@@ -191,7 +191,7 @@ elif args.mode == 'list':
             if os.path.isdir(args.test_file): # test_file 개수가 여러개일 경우(폴더 경로 입력받음)
                 test_file_list = glob.glob(args.test_file + '*')
                 # test_file_list = os.listdir(args.test_file)
-                for test_file in tqdm(test_file_list[:2]):
+                for test_file in tqdm(test_file_list):
                     print()
                     file_name_list.append("/".join(test_file.split('/')[-3:]))
                     nmr_feat,test_feat = feats_loading(test_file, ln.strip(), noresqa_or_noresqaMOS = args.metric_type)
