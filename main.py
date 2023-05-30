@@ -11,10 +11,17 @@ import librosa as librosa
 import torch.nn.functional as F
 import numpy as np
 import torch.nn as nn
+import os
+import pandas as pd
+import glob
+from tqdm import tqdm
 from model import NORESQA
 from scipy import signal
 
-CONFIG_PATH = 'models/wav2vec_small.pt'
+# save_model_path = 'models/' # default
+save_model_path = 'loaded_models/' # my config
+
+CONFIG_PATH = save_model_path + 'wav2vec_small.pt'
 
 def argument_parser():
     """
@@ -37,10 +44,10 @@ model = NORESQA(output=40, output2=40, metric_type = args.metric_type, config_pa
 
 # Loading checkpoint
 if args.metric_type==0:
-    model_checkpoint_path = 'models/model_noresqa.pth'
+    model_checkpoint_path = save_model_path + 'model_noresqa.pth'
     state = torch.load(model_checkpoint_path,map_location="cpu")['state_base']
 elif args.metric_type == 1:
-    model_checkpoint_path = 'models/model_noresqa_mos.pth'
+    model_checkpoint_path = save_model_path + 'model_noresqa_mos.pth'
     state = torch.load(model_checkpoint_path,map_location="cpu")['state_dict']
 
 pretrained_dict = {}
@@ -141,34 +148,108 @@ def feats_loading(test_path, ref_path=None, noresqa_or_noresqaMOS = 0):
             return audio_ref, audio_test
 
 
-if args.mode == 'file':
+if args.mode == 'file': # nmr이 1개인 경우
+    if os.path.isdir(args.test_file): # test_file 개수가 여러개일 경우(폴더 경로 입력받음)
+        test_file_list = glob.glob(args.test_file + '*')
+        for test_file in test_file_list:
+            nmr_feat,test_feat = feats_loading(test_file, args.nmr, noresqa_or_noresqaMOS = args.metric_type)
+            test_feat = torch.from_numpy(test_feat).float().to(device).unsqueeze(0)
+            nmr_feat = torch.from_numpy(nmr_feat).float().to(device).unsqueeze(0)
 
-    nmr_feat,test_feat = feats_loading(args.test_file, args.nmr, noresqa_or_noresqaMOS = args.metric_type)
-    test_feat = torch.from_numpy(test_feat).float().to(device).unsqueeze(0)
-    nmr_feat = torch.from_numpy(nmr_feat).float().to(device).unsqueeze(0)
+            if args.metric_type == 0:
+                noresqa_pout, noresqa_qout = model_prediction_noresqa(test_feat, nmr_feat)
+                print('Probaility of the test speech cleaner than the given NMR =', noresqa_pout)
+                print('NORESQA score of the test speech with respect to the given NMR =', noresqa_qout)
 
-    if args.metric_type == 0:
-        noresqa_pout, noresqa_qout = model_prediction_noresqa(test_feat, nmr_feat)
-        print('Probaility of the test speech cleaner than the given NMR =', noresqa_pout)
-        print('NORESQA score of the test speech with respect to the given NMR =', noresqa_qout)
+            elif args.metric_type == 1:
+                mos_score = model_prediction_noresqa_mos(test_feat, nmr_feat)
+                print('MOS score of the test speech (assuming NMR is clean) =', str(5.0-mos_score))
+    
+    else: # 원래대로 작동 (1개의 test_file에 대해서만)
+        nmr_feat,test_feat = feats_loading(args.test_file, args.nmr, noresqa_or_noresqaMOS = args.metric_type)
+        test_feat = torch.from_numpy(test_feat).float().to(device).unsqueeze(0)
+        nmr_feat = torch.from_numpy(nmr_feat).float().to(device).unsqueeze(0)
 
-    elif args.metric_type == 1:
-        mos_score = model_prediction_noresqa_mos(test_feat, nmr_feat)
-        print('MOS score of the test speech (assuming NMR is clean) =', str(5.0-mos_score))
+        if args.metric_type == 0:
+            noresqa_pout, noresqa_qout = model_prediction_noresqa(test_feat, nmr_feat)
+            print('Probaility of the test speech cleaner than the given NMR =', noresqa_pout)
+            print('NORESQA score of the test speech with respect to the given NMR =', noresqa_qout)
+
+        elif args.metric_type == 1:
+            mos_score = model_prediction_noresqa_mos(test_feat, nmr_feat)
+            print('MOS score of the test speech (assuming NMR is clean) =', str(5.0-mos_score))
 
 elif args.mode == 'list':
 
     with open(args.nmr) as f:
-        for ln in f:
+        df = pd.DataFrame()
+        p_column_name_list, q_column_name_list, s_column_name_list  = [], [], []
+        all_pout_list, all_qout_list, all_mos_list = [], [], []
+        for ln in tqdm(f):
+            pout_list, qout_list, score_list = [], [], []
+            file_name_list = []
+            if os.path.isdir(args.test_file): # test_file 개수가 여러개일 경우(폴더 경로 입력받음)
+                test_file_list = glob.glob(args.test_file + '*')
+                # test_file_list = os.listdir(args.test_file)
+                for test_file in tqdm(test_file_list[:2]):
+                    print()
+                    file_name_list.append("/".join(test_file.split('/')[-3:]))
+                    nmr_feat,test_feat = feats_loading(test_file, ln.strip(), noresqa_or_noresqaMOS = args.metric_type)
+                    test_feat = torch.from_numpy(test_feat).float().to(device).unsqueeze(0)
+                    nmr_feat = torch.from_numpy(nmr_feat).float().to(device).unsqueeze(0)
 
-            nmr_feat,test_feat = feats_loading(args.test_file, ln.strip(), noresqa_or_noresqaMOS = args.metric_type)
-            test_feat = torch.from_numpy(test_feat).float().to(device).unsqueeze(0)
-            nmr_feat = torch.from_numpy(nmr_feat).float().to(device).unsqueeze(0)
+                    if args.metric_type==0:
+                        pout, qout = model_prediction_noresqa(test_feat,nmr_feat)
+                        pout_list.append(pout)
+                        qout_list.append(qout)
+                        print(f"Prob. of test cleaner than {ln.strip()} = {pout}. Noresqa score = {qout}")
 
-            if args.metric_type==0:
-                pout, qout = model_prediction_noresqa(test_feat,nmr_feat)
-                print(f"Prob. of test cleaner than {ln.strip()} = {pout}. Noresqa score = {qout}")
+                    elif args.metric_type == 1:
+                        score = model_prediction_noresqa_mos(test_feat,nmr_feat)
+                        score_list.append(5-score)
+                        print(f"MOS of test with respect to clean {ln.strip()} = {5-score}")
+                    
+            else: # 원래대로 작동 (1개의 test_file에 대해서만)
+                nmr_feat,test_feat = feats_loading(args.test_file, ln.strip(), noresqa_or_noresqaMOS = args.metric_type)
+                test_feat = torch.from_numpy(test_feat).float().to(device).unsqueeze(0)
+                nmr_feat = torch.from_numpy(nmr_feat).float().to(device).unsqueeze(0)
 
-            elif args.metric_type == 1:
-                score = model_prediction_noresqa_mos(test_feat,nmr_feat)
-                print(f"MOS of test with respect to clean {ln.strip()} = {5-score}")
+                if args.metric_type==0:
+                    pout, qout = model_prediction_noresqa(test_feat,nmr_feat)
+                    pout_list.append(pout)
+                    qout_list.append(qout)
+                    print(f"Prob. of test cleaner than {ln.strip()} = {pout}. Noresqa score = {qout}")
+
+                elif args.metric_type == 1:
+                    score = model_prediction_noresqa_mos(test_feat,nmr_feat)
+                    print(f"MOS of test with respect to clean {ln.strip()} = {5-score}")
+    
+            # 하나의 nmr이 끝날때마다 현재 작업 경로에 결과 csv 저장
+            if len(pout_list) != 0: # metric_type:0(NORESQA)으로 실행한 경우
+                p_column_name_list.append('p/' + "/".join(ln.strip().split('/')[-2:]))
+                q_column_name_list.append('q/' + "/".join(ln.strip().split('/')[-2:]))
+                all_pout_list.append(pout_list)
+                all_qout_list.append(qout_list)
+                # df['p/' + "/".join(ln.strip().split('/')[-2:])] = pout_list
+                # df['q/' + "/".join(ln.strip().split('/')[-2:])] = qout_list
+            else:
+                s_column_name_list.append('M_s/' + "/".join(ln.strip().split('/')[-2:]))
+                all_mos_list.append(score_list)
+                # df['M_s/' + "/".join(ln.strip().split('/')[-2:])] = score_list
+    
+    if args.metric_type == 0:
+        df['test_file_name'] = file_name_list
+        for pidx, p in enumerate(p_column_name_list):
+            df[p] = all_pout_list[pidx]
+            # for pouts in all_pout_list:
+            #     df[p] = pouts
+        for qidx, q in enumerate(q_column_name_list):
+            df[q] = all_qout_list[qidx]
+            # for qouts in all_qout_list:
+            #     df[q] = qouts
+        df.to_csv("NORESQAsd.csv", index=False) # index는 행에 표시되는 프레임index
+    else: 
+        df.to_csv("NORESQA_MOS.csv", index=False)
+    
+    
+        

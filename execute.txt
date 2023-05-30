@@ -1,0 +1,16 @@
+usage: main.py [-h] [--metric_type METRIC_TYPE] [--GPU_id GPU_ID] [--mode {file,list}] [--test_file TEST_FILE] [--nmr NMR]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --metric_type METRIC_TYPE
+                        NORESQA->0, NORESQA-MOS->1 (default: 1)
+  --GPU_id GPU_ID       GPU Id to use (-1 for cpu) (default: -1)
+  --mode {file,list}    predict noresqa for test file with another file (mode = file) as NMR or, with a database given as list of files (mode=list) as
+                        NMRs (default: file)
+  --test_file TEST_FILE
+                        test speech file (default: sample_clips/noisy.wav)
+  --nmr NMR             for mode=file, path of nmr speech file. for mode=list, path of text file which contains list of nmr paths (default:
+                        sample_clips/clean.wav)
+
+
+python main.py --metric_type 0 --GPU_id 1 --mode list --test_file ../datasets/vox/voxconverse/DEV402/wav/ --nmr clean_data_list.txt
