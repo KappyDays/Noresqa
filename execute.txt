@@ -14,3 +14,5 @@ optional arguments:
 
 
 python main.py --metric_type 0 --GPU_id 1 --mode list --test_file ../datasets/vox/voxconverse/DEV402/wav/ --nmr clean_data_list.txt
+
+python main.py --metric_type 0 --GPU_id -1 --save_name val.csv --mode list --test_file ../datasets/vox/voxconverse/VAL46/wav/ --nmr clean_data_one.txt

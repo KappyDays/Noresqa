@@ -31,6 +31,7 @@ def argument_parser():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--metric_type', help='NORESQA->0, NORESQA-MOS->1', default=1, type=int)
     parser.add_argument('--GPU_id', help='GPU Id to use (-1 for cpu)', default=-1, type=int)
+    parser.add_argument('--save_name', help='File name to save csv', default="result.csv", type=str)
     parser.add_argument('--mode', choices=['file', 'list'], help='predict noresqa for test file with another file (mode = file) as NMR or, with a database given as list of files (mode=list) as NMRs', default='file', type=str)
     parser.add_argument('--test_file', help='test speech file', required=False, type=str, default='sample_clips/noisy.wav')
     parser.add_argument('--nmr', help='for mode=file, path of nmr speech file. for mode=list, path of text file which contains list of nmr paths', required = False, type=str, default='sample_clips/clean.wav')
@@ -187,7 +188,7 @@ elif args.mode == 'list':
         all_pout_list, all_qout_list, all_mos_list = [], [], []
         for ln in tqdm(f):
             pout_list, qout_list, score_list = [], [], []
-            file_name_list = []
+            file_name_list = [] # file_name_list 받는거 변경하기 temp = [] for xx in test_file_list: temp.append("/".join(xx.split('/')[-3:]))
             if os.path.isdir(args.test_file): # test_file 개수가 여러개일 경우(폴더 경로 입력받음)
                 test_file_list = glob.glob(args.test_file + '*')
                 # test_file_list = os.listdir(args.test_file)
@@ -202,6 +203,7 @@ elif args.mode == 'list':
                         pout, qout = model_prediction_noresqa(test_feat,nmr_feat)
                         pout_list.append(pout)
                         qout_list.append(qout)
+                        print("Test_file name: " + "/".join(test_file.split('/')[-3:]))
                         print(f"Prob. of test cleaner than {ln.strip()} = {pout}. Noresqa score = {qout}")
 
                     elif args.metric_type == 1:
@@ -237,8 +239,8 @@ elif args.mode == 'list':
                 all_mos_list.append(score_list)
                 # df['M_s/' + "/".join(ln.strip().split('/')[-2:])] = score_list
     
+    df['test_file_name'] = file_name_list
     if args.metric_type == 0:
-        df['test_file_name'] = file_name_list
         for pidx, p in enumerate(p_column_name_list):
             df[p] = all_pout_list[pidx]
             # for pouts in all_pout_list:
@@ -247,9 +249,11 @@ elif args.mode == 'list':
             df[q] = all_qout_list[qidx]
             # for qouts in all_qout_list:
             #     df[q] = qouts
-        df.to_csv("NORESQAsd.csv", index=False) # index는 행에 표시되는 프레임index
+        df.to_csv(args.save_name, index=False) # index는 행에 표시되는 프레임index
     else: 
-        df.to_csv("NORESQA_MOS.csv", index=False)
+        for sidx, s in enumerate(s_column_name_list):
+            df[s] = s_column_name_list[sidx]        
+        df.to_csv(args.save_name, index=False)
     
     
         
