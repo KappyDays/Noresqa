@@ -12,10 +12,13 @@ def make_clean_txt(data_path, save_path, save_txt): #
         for data in data_list:
             save = data_path + '/' + data
             f.write(f'{save}\n')
-
-if args.option == 0: # make_clean_txt
-    clean_folder_path = 'clean_data/'
-    folder_list = os.listdir(clean_folder_path)
-    for folder in folder_list:
-        make_clean_txt(clean_folder_path+folder, './', 'clean_data_list.txt')
+# /mnt/aiter/kkr/datasets/VoxSRC/Sub_Data/NMR
+if __name__ == '__main__':
+    if args.option == 0: # make_clean_txt
+        clean_folder_path = '/mnt/aiter/kkr/datasets/VoxSRC/Sub_Data/NMR/'
+        folder_list = os.listdir(clean_folder_path)
+        # for folder in folder_list:
+        #     make_clean_txt(clean_folder_path+folder, './', 'clean_data_list.txt')
+            
+        make_clean_txt(clean_folder_path, './', 'clean_data_list.txt')
             

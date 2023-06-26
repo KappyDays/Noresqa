@@ -17,6 +17,7 @@ import glob
 from tqdm import tqdm
 from model import NORESQA
 from scipy import signal
+import soundfile as sf
 
 # save_model_path = 'models/' # default
 save_model_path = 'loaded_models/' # my config
@@ -35,6 +36,9 @@ def argument_parser():
     parser.add_argument('--mode', choices=['file', 'list'], help='predict noresqa for test file with another file (mode = file) as NMR or, with a database given as list of files (mode=list) as NMRs', default='file', type=str)
     parser.add_argument('--test_file', help='test speech file', required=False, type=str, default='sample_clips/noisy.wav')
     parser.add_argument('--nmr', help='for mode=file, path of nmr speech file. for mode=list, path of text file which contains list of nmr paths', required = False, type=str, default='sample_clips/clean.wav')
+    parser.add_argument('--in_lab_dir', required=True, type=str, help='input directory with VAD labels')
+    # parser.add_argument('--in_wav_dir', required=True, type=str, help='input directory for wavs')    
+    parser.add_argument('--sample_rate', required=False, type=int, default=16000, help='sampling rate')    
     return parser
 
 args = argument_parser().parse_args()
@@ -120,11 +124,11 @@ def audio_loading(path,sampling_rate=16000):
 def check_size(audio_ref,audio_test):
 
     if len(audio_ref) > len(audio_test):
-        print('Durations dont match. Adjusting duration of reference.')
+        # print('Durations dont match. Adjusting duration of reference.')
         audio_ref = audio_ref[:len(audio_test)]
 
     elif len(audio_ref) < len(audio_test):
-        print('Durations dont match. Adjusting duration of reference.')
+        # print('Durations dont match. Adjusting duration of reference.')
         while len(audio_test) > len(audio_ref):
             audio_ref = np.append(audio_ref, audio_ref)
         audio_ref = audio_ref[:len(audio_test)]
@@ -147,6 +151,38 @@ def feats_loading(test_path, ref_path=None, noresqa_or_noresqaMOS = 0):
             return ref_feat,test_feat
         else:
             return audio_ref, audio_test
+        
+# audio loading and feature extraction
+def my_feats_loading(test_file, ref_path=None, noresqa_or_noresqaMOS = 0):
+
+    if noresqa_or_noresqaMOS == 0 or noresqa_or_noresqaMOS == 1:
+
+        audio_ref = audio_loading(ref_path)
+        # audio_test = audio_loading(test_path)
+        audio_test = test_file.astype('float32')
+        audio_ref, audio_test = check_size(audio_ref,audio_test)
+
+        if noresqa_or_noresqaMOS == 0:
+            ref_feat = extract_stft(audio_ref)
+            test_feat = extract_stft(audio_test)
+            return ref_feat,test_feat
+        else:
+            return audio_ref, audio_test
+
+# load segmented_speech to evaluat speech only
+def load_segmented_speech(in_lab_dir ,in_wav_dir):
+    lab_file_paths = glob.glob(os.path.join(in_lab_dir, '*.lab'))
+    for lab_file_path in lab_file_paths:
+        # read lab file
+        labs = np.atleast_2d((np.loadtxt(lab_file_path, usecols=(0, 1)) * args.sample_rate).astype(int))
+
+        # read wav file
+        fn = os.path.basename(lab_file_path).replace('.lab', '')
+        signal, _ = sf.read(f'{os.path.join(in_wav_dir, fn)}.wav')
+        for segnum in range(len(labs)):
+            seg = signal[labs[segnum, 0]:labs[segnum, 1]]
+            
+    return seg
 
 
 if args.mode == 'file': # nmr이 1개인 경우
@@ -180,36 +216,72 @@ if args.mode == 'file': # nmr이 1개인 경우
             mos_score = model_prediction_noresqa_mos(test_feat, nmr_feat)
             print('MOS score of the test speech (assuming NMR is clean) =', str(5.0-mos_score))
 
-elif args.mode == 'list':
+elif args.mode == 'list': # nmr이 여러개
 
     with open(args.nmr) as f:
+        # csv 결과 저장용 list, df 선언
         df = pd.DataFrame()
         p_column_name_list, q_column_name_list, s_column_name_list  = [], [], []
         all_pout_list, all_qout_list, all_mos_list = [], [], []
+        # 모든 nmr에 대해 SQA 실행
         for ln in tqdm(f):
-            pout_list, qout_list, score_list = [], [], []
-            file_name_list = [] # file_name_list 받는거 변경하기 temp = [] for xx in test_file_list: temp.append("/".join(xx.split('/')[-3:]))
+            pout_seg_list, qout_seg_list, pout_A_list, qout_A_list, score_list = [], [], [], [], []
+            file_name_list = []
+             
             if os.path.isdir(args.test_file): # test_file 개수가 여러개일 경우(폴더 경로 입력받음)
                 test_file_list = glob.glob(args.test_file + '*')
                 # test_file_list = os.listdir(args.test_file)
+                # for xx in test_file_list: 
+                #     file_name_list.append("/".join(xx.split('/')[-3:]))
+                    
+                lab_files = glob.glob(os.path.join(args.in_lab_dir, '*.lab'))
                 for test_file in tqdm(test_file_list):
                     print()
                     file_name_list.append("/".join(test_file.split('/')[-3:]))
-                    nmr_feat,test_feat = feats_loading(test_file, ln.strip(), noresqa_or_noresqaMOS = args.metric_type)
+                    
+                    # 전체 speech SQA
+                    nmr_feat, test_feat = feats_loading(test_file, ln.strip(), noresqa_or_noresqaMOS = args.metric_type)
                     test_feat = torch.from_numpy(test_feat).float().to(device).unsqueeze(0)
                     nmr_feat = torch.from_numpy(nmr_feat).float().to(device).unsqueeze(0)
-
+                    
                     if args.metric_type==0:
-                        pout, qout = model_prediction_noresqa(test_feat,nmr_feat)
-                        pout_list.append(pout)
-                        qout_list.append(qout)
-                        print("Test_file name: " + "/".join(test_file.split('/')[-3:]))
-                        print(f"Prob. of test cleaner than {ln.strip()} = {pout}. Noresqa score = {qout}")
+                        pout_A, qout_A = model_prediction_noresqa(test_feat,nmr_feat)
+                    elif args.metric_type==1:
+                        pass
+                    # 분할 SQA (Speech의 개수만큼 SQA 수행)
+                    # read lab file
+                    lab_file_path = args.in_lab_dir + os.path.basename(test_file)[:-4] + ".lab"
+                    labs = np.atleast_2d((np.loadtxt(lab_file_path, usecols=(0, 1)) * args.sample_rate).astype(int))
 
-                    elif args.metric_type == 1:
-                        score = model_prediction_noresqa_mos(test_feat,nmr_feat)
-                        score_list.append(5-score)
-                        print(f"MOS of test with respect to clean {ln.strip()} = {5-score}")
+                    # read wav file
+                    seg_signal, _ = sf.read(test_file)
+                    
+                    p_sum, q_sum = 0, 0
+                    for segnum in range(len(labs)):
+                        segmented_file = seg_signal[labs[segnum, 0]:labs[segnum, 1]]
+            
+                        nmr_feat, test_feat = my_feats_loading(segmented_file, ln.strip(), noresqa_or_noresqaMOS = args.metric_type)
+                        test_feat = torch.from_numpy(test_feat).float().to(device).unsqueeze(0)
+                        nmr_feat = torch.from_numpy(nmr_feat).float().to(device).unsqueeze(0)
+                        
+                        if args.metric_type==0:
+                            pout, qout = model_prediction_noresqa(test_feat,nmr_feat)
+                            p_sum += pout
+                            q_sum += qout
+
+                        elif args.metric_type == 1:
+                            continue
+                            score = model_prediction_noresqa_mos(test_feat,nmr_feat)
+                            score_list.append(5-score)
+                            print(f"MOS of test with respect to clean {ln.strip()} = {5-score}")
+                            
+                    print("Test_file name: " + "/".join(test_file.split('/')[-3:]))
+                    print(f"=====[All]=====\nProb. of test cleaner than {ln.strip()} = {pout_A}\n Noresqa score = {qout_A}")
+                    print(f"=====[Seg]=====\nProb. of test cleaner than {ln.strip()} = {p_sum/len(labs)}\n Noresqa score = {q_sum/len(labs)}\n")
+                    pout_A_list.append(pout_A)
+                    qout_A_list.append(qout_A)
+                    pout_seg_list.append(p_sum / len(labs))
+                    qout_seg_list.append(q_sum / len(labs))
                     
             else: # 원래대로 작동 (1개의 test_file에 대해서만)
                 nmr_feat,test_feat = feats_loading(args.test_file, ln.strip(), noresqa_or_noresqaMOS = args.metric_type)
@@ -218,8 +290,8 @@ elif args.mode == 'list':
 
                 if args.metric_type==0:
                     pout, qout = model_prediction_noresqa(test_feat,nmr_feat)
-                    pout_list.append(pout)
-                    qout_list.append(qout)
+                    pout_seg_list.append(pout)
+                    qout_seg_list.append(qout)
                     print(f"Prob. of test cleaner than {ln.strip()} = {pout}. Noresqa score = {qout}")
 
                 elif args.metric_type == 1:
@@ -227,28 +299,27 @@ elif args.mode == 'list':
                     print(f"MOS of test with respect to clean {ln.strip()} = {5-score}")
     
             # 하나의 nmr이 끝날때마다 현재 작업 경로에 결과 csv 저장
-            if len(pout_list) != 0: # metric_type:0(NORESQA)으로 실행한 경우
-                p_column_name_list.append('p/' + "/".join(ln.strip().split('/')[-2:]))
-                q_column_name_list.append('q/' + "/".join(ln.strip().split('/')[-2:]))
-                all_pout_list.append(pout_list)
-                all_qout_list.append(qout_list)
-                # df['p/' + "/".join(ln.strip().split('/')[-2:])] = pout_list
-                # df['q/' + "/".join(ln.strip().split('/')[-2:])] = qout_list
+            if len(pout_seg_list) != 0: # metric_type:0(NORESQA)으로 실행한 경우
+                p_column_name_list.append('p_All=' + os.path.basename(ln.strip()))
+                p_column_name_list.append('p_Seg=' + os.path.basename(ln.strip()))
+                q_column_name_list.append('q_All=' + os.path.basename(ln.strip()))
+                q_column_name_list.append('q_Seg=' + os.path.basename(ln.strip()))
+                all_pout_list.append(pout_A_list)
+                all_pout_list.append(pout_seg_list)
+                all_qout_list.append(qout_A_list)
+                all_qout_list.append(qout_seg_list)
             else:
                 s_column_name_list.append('M_s/' + "/".join(ln.strip().split('/')[-2:]))
                 all_mos_list.append(score_list)
                 # df['M_s/' + "/".join(ln.strip().split('/')[-2:])] = score_list
     
+    # 모든 파일에 대한 SQA 끝난 후 저장
     df['test_file_name'] = file_name_list
     if args.metric_type == 0:
         for pidx, p in enumerate(p_column_name_list):
             df[p] = all_pout_list[pidx]
-            # for pouts in all_pout_list:
-            #     df[p] = pouts
         for qidx, q in enumerate(q_column_name_list):
             df[q] = all_qout_list[qidx]
-            # for qouts in all_qout_list:
-            #     df[q] = qouts
         df.to_csv(args.save_name, index=False) # index는 행에 표시되는 프레임index
     else: 
         for sidx, s in enumerate(s_column_name_list):
