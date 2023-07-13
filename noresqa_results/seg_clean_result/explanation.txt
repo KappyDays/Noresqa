@@ -1,0 +1,2 @@
+speech가 있는 부분만 잘라서(분할) Noresqa score 측정
+data list는 /mnt/aiter/kkr/VoxSRC/Noresqa/my_works/clean_data_list/seg_clean_data_list.txt에 있음
